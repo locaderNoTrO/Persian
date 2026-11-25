@@ -1,0 +1,69 @@
+name: Build NoTrO live APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unzip project (zip uploaded to the repo)
+        run: |
+          set -e
+          Z=$(ls *.zip 2>/dev/null | head -n1 || true)
+          if [ -n "$Z" ]; then
+            mkdir -p _src
+            unzip -q -o "$Z" -d _src -x ".github/*"
+            S=$(find _src -name settings.gradle.kts -not -path "*/node_modules/*" | head -n1)
+            echo "PROJECT_DIR=$(dirname "$S")" >> $GITHUB_ENV
+          else
+            echo "PROJECT_DIR=." >> $GITHUB_ENV
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Download Persian offline speech model (Vosk)
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+          mkdir -p app/src/main/assets/model-fa _dl
+          curl -L --retry 5 -o _dl/fa.zip https://alphacephei.com/vosk/models/vosk-model-small-fa-0.42.zip
+          unzip -q _dl/fa.zip -d _dl/m
+          TOP=$(ls _dl/m | head -n1)
+          cp -r "_dl/m/$TOP"/. app/src/main/assets/model-fa/
+          ls app/src/main/assets/model-fa
+
+      - name: Build offline map (Iran + Iraq)
+        continue-on-error: true
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+          sudo apt-get update -y && sudo apt-get install -y osmium-tool
+          pip install shapely
+          mkdir -p _map
+          curl -L --retry 5 -o _map/iran.pbf https://download.geofabrik.de/asia/iran-latest.osm.pbf
+          curl -L --retry 5 -o _map/iraq.pbf https://download.geofabrik.de/asia/iraq-latest.osm.pbf
+          python3 scripts/build_places.py _map app/src/main/assets
+          ls -la app/src/main/assets
+
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.7
+
+      - name: Build APK
+        run: |
+          cd "$PROJECT_DIR"
+          gradle assembleDebug --no-daemon --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NoTrO-live-apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
