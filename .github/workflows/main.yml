@@ -41,6 +41,36 @@ jobs:
           cp -r "_dl/m/$TOP"/. app/src/main/assets/model-fa/
           ls app/src/main/assets/model-fa
 
+      - name: Bundle Persian voice (Piper + sherpa-onnx)
+        continue-on-error: true
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+          V=v1.10.17
+          mkdir -p _tts app/src/main/assets/tts-fa app/src/main/jniLibs/arm64-v8a
+          # 1) the voice model
+          git lfs install
+          git clone --depth 1 https://huggingface.co/csukuangfj/vits-piper-fa_IR-amir-medium _tts/model
+          test $(stat -c %s _tts/model/fa_IR-amir-medium.onnx) -gt 10000000
+          cp _tts/model/fa_IR-amir-medium.onnx app/src/main/assets/tts-fa/model.onnx
+          cp _tts/model/tokens.txt app/src/main/assets/tts-fa/
+          cp -r _tts/model/espeak-ng-data app/src/main/assets/tts-fa/
+          # 2) native libraries
+          curl -L --retry 5 -o _tts/sherpa.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/$V/sherpa-onnx-$V-android.tar.bz2
+          mkdir -p _tts/lib && tar xjf _tts/sherpa.tar.bz2 -C _tts/lib
+          D=$(find _tts/lib -type d -name arm64-v8a | head -n1)
+          cp "$D"/*.so app/src/main/jniLibs/arm64-v8a/
+          ls app/src/main/jniLibs/arm64-v8a
+          # 3) Kotlin API (replaces the placeholder only when it downloads correctly)
+          T=app/src/main/java/com/k2fsa/sherpa/onnx/Tts.kt
+          for U in \
+            https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/$V/sherpa-onnx/kotlin-api/Tts.kt \
+            https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/$V/android/SherpaOnnxTts/app/src/main/java/com/k2fsa/sherpa/onnx/Tts.kt ; do
+            if curl -fL --retry 3 -o _tts/Tts.kt "$U" && grep -q "class OfflineTts" _tts/Tts.kt && grep -q "package com.k2fsa.sherpa.onnx" _tts/Tts.kt; then
+              cp _tts/Tts.kt "$T"; echo "using $U"; break
+            fi
+          done
+
       - name: Build offline map (Iran + Iraq)
         continue-on-error: true
         run: |
@@ -67,3 +97,4 @@ jobs:
         with:
           name: NoTrO-live-apk
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
+          
