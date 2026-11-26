@@ -43,6 +43,8 @@ jobs:
 
       - name: Bundle Persian voice (Piper + sherpa-onnx)
         continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -e
           cd "$PROJECT_DIR"
@@ -55,19 +57,17 @@ jobs:
           cp _tts/model/fa_IR-amir-medium.onnx app/src/main/assets/tts-fa/model.onnx
           cp _tts/model/tokens.txt app/src/main/assets/tts-fa/
           cp -r _tts/model/espeak-ng-data app/src/main/assets/tts-fa/
-          # 2) native libraries
-          curl -L --retry 5 -o _tts/sherpa.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/$V/sherpa-onnx-$V-android.tar.bz2
-          mkdir -p _tts/lib && tar xjf _tts/sherpa.tar.bz2 -C _tts/lib
+          # 2) native libraries (found through the GitHub API, no guessed file names)
+          gh release download $V -R k2-fsa/sherpa-onnx -p '*android.tar.bz2' -D _tts
+          mkdir -p _tts/lib && tar xjf _tts/*android.tar.bz2 -C _tts/lib
           D=$(find _tts/lib -type d -name arm64-v8a | head -n1)
           cp "$D"/*.so app/src/main/jniLibs/arm64-v8a/
           ls app/src/main/jniLibs/arm64-v8a
-          # 3) Kotlin API (replaces the placeholder only when it downloads correctly)
-          T=app/src/main/java/com/k2fsa/sherpa/onnx/Tts.kt
-          for U in \
-            https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/$V/sherpa-onnx/kotlin-api/Tts.kt \
-            https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/$V/android/SherpaOnnxTts/app/src/main/java/com/k2fsa/sherpa/onnx/Tts.kt ; do
-            if curl -fL --retry 3 -o _tts/Tts.kt "$U" && grep -q "class OfflineTts" _tts/Tts.kt && grep -q "package com.k2fsa.sherpa.onnx" _tts/Tts.kt; then
-              cp _tts/Tts.kt "$T"; echo "using $U"; break
+          # 3) Kotlin API from the same release tag
+          git clone --depth 1 --branch $V https://github.com/k2-fsa/sherpa-onnx _tts/src
+          for F in $(find _tts/src -name Tts.kt); do
+            if grep -q "class OfflineTts" "$F" && grep -q "package com.k2fsa.sherpa.onnx" "$F"; then
+              cp "$F" app/src/main/java/com/k2fsa/sherpa/onnx/Tts.kt; echo "using $F"; break
             fi
           done
 
